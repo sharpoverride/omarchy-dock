@@ -40,7 +40,7 @@ Item {
   readonly property int dockReserve: Style.space(76)
   readonly property int iconSize: Math.round(36 * Style.fontScale)
   readonly property int cellGutter: Style.spacing.xs
-  readonly property int cellPadding: Style.spacing.sm
+  readonly property int cellPadding: Style.spacing.md
   readonly property int labelHeight: Math.ceil(labelMetrics.height) * 2
   readonly property int cellWidth: Math.round(iconSize * 2.45)
   readonly property int cellHeight: cellPadding * 2 + iconSize + Style.spacing.xs + labelHeight
@@ -1180,7 +1180,7 @@ Item {
     Rectangle {
       anchors.fill: parent
       anchors.margins: Style.spacing.xxs
-      radius: Style.cornerRadius
+      radius: Style.space(12)
       color: cell.selected ? Commons.Color.menu.selectedBackground : (cellMouse.containsMouse ? Style.hoverFill : "transparent")
     }
 
