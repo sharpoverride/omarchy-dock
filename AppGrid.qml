@@ -533,7 +533,7 @@ Item {
 
                 width: searchList.width
                 height: isBest ? Style.space(60) : Style.space(44)
-                radius: Style.cornerRadius
+                radius: Style.space(12)
                 color: selected ? Commons.Color.menu.selectedBackground
                   : (rowHover.containsMouse ? Style.hoverFill : (isBest ? Util.alpha(Commons.Color.menu.text, 0.04) : "transparent"))
 
@@ -590,7 +590,7 @@ Item {
                   anchors.right: parent.right
                   anchors.rightMargin: Style.spacing.md
                   anchors.verticalCenter: parent.verticalCenter
-                  radius: Style.cornerRadius
+                  radius: Style.space(8)
                   color: resultRow.selected ? Util.alpha(Commons.Color.menu.selectedText, 0.16) : Util.alpha(Commons.Color.menu.text, 0.08)
                   width: bestBadgeText.implicitWidth + Style.spacing.sm * 2
                   height: bestBadgeText.implicitHeight + Style.spacing.xxs * 2
@@ -785,7 +785,7 @@ Item {
                         readonly property bool current: root.view === modelData[0]
                         height: Style.space(24)
                         width: viewLabel.implicitWidth + Style.spacing.md * 2
-                        radius: Style.cornerRadius
+                        radius: Style.space(8)
                         color: current ? Util.alpha(Commons.Color.accent, 0.25) : (viewMouse.containsMouse ? Style.hoverFill : "transparent")
                         border.width: 1
                         border.color: current ? Util.alpha(Commons.Color.accent, 0.6) : Util.alpha(Commons.Color.menu.text, 0.1)
@@ -1247,7 +1247,7 @@ Item {
     property int iconPx: Style.space(24)
     readonly property bool selected: globalIndex === root.selectedIndex
 
-    radius: Style.cornerRadius
+    radius: Style.space(12)
     color: selected ? Commons.Color.menu.selectedBackground : (rowMouse.containsMouse ? Style.hoverFill : "transparent")
     onSelectedChanged: if (selected && root.keyNav) root.reveal(row)
 
@@ -1294,7 +1294,7 @@ Item {
 
     width: fbtnText.implicitWidth + Style.spacing.sm * 2
     height: Style.space(26)
-    radius: Style.cornerRadius
+    radius: Style.space(8)
     color: fbtnMouse.containsMouse ? Style.hoverFill : "transparent"
 
     Text {
@@ -1325,7 +1325,7 @@ Item {
 
     width: parent ? parent.width : 0
     height: visible ? Style.spacing.popupRowHeight : 0
-    radius: Style.cornerRadius
+    radius: Style.space(8)
     color: rowMouse.containsMouse ? Style.hoverFill : "transparent"
 
     Text {
