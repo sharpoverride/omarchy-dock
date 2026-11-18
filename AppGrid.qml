@@ -43,7 +43,8 @@ Item {
   readonly property int cellPadding: Style.spacing.md
   readonly property int labelHeight: Math.ceil(labelMetrics.height) * 2
   readonly property int cellWidth: Math.round(iconSize * 2.75)
-  readonly property int cellHeight: cellPadding * 2 + iconSize + Style.spacing.xs + labelHeight
+  readonly property int cellTopPadding: cellPadding * 3
+  readonly property int cellHeight: cellTopPadding + cellPadding + iconSize + Style.spacing.xs + labelHeight
   readonly property int maxColumns: 8
   readonly property int borderWidth: Math.max(1, Style.space(1))
   readonly property int contentMargin: Style.spacing.lg
@@ -345,7 +346,7 @@ Item {
           anchors.top: parent.top
           anchors.left: parent.left
           anchors.right: parent.right
-          anchors.topMargin: root.contentMargin + root.sectionPad
+          anchors.topMargin: Math.round((root.contentMargin + root.sectionPad) / 2)
           anchors.leftMargin: root.contentMargin + root.sectionPad
           anchors.rightMargin: root.contentMargin + root.sectionPad
           height: root.searchHeight
@@ -489,7 +490,7 @@ Item {
         Rectangle {
           id: searchDivider
           anchors.top: searchBox.bottom
-          anchors.topMargin: root.sectionPad
+          anchors.topMargin: Math.round(root.sectionPad / 2)
           anchors.left: parent.left
           anchors.right: parent.right
           height: 1
@@ -1204,7 +1205,7 @@ Item {
     Image {
       id: cellIcon
       anchors.horizontalCenter: parent.horizontalCenter
-      y: root.cellPadding
+      y: root.cellTopPadding
       width: root.iconSize
       height: root.iconSize
       sourceSize: Qt.size(root.iconSize * 2, root.iconSize * 2)
