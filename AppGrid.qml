@@ -803,7 +803,7 @@ Item {
                 Flow {
                   visible: root.view === "category" && !root.openGroup
                   width: parent.width
-                  spacing: Style.spacing.md
+                  spacing: Style.space(16)
 
                   Repeater {
                     model: root.groupList
@@ -812,13 +812,13 @@ Item {
                       required property var modelData
                       readonly property int perRow: 4
                       width: Math.floor((parent.width - parent.spacing * (perRow - 1)) / perRow)
-                      height: Style.space(150)
+                      height: Style.space(164)
 
                       Rectangle {
                         id: tileBox
                         width: parent.width
                         height: Style.space(112)
-                        radius: Style.cornerRadius * 1.5
+                        radius: 20
                         color: tileMouse.containsMouse ? Style.hoverFill : Util.alpha(Commons.Color.menu.text, 0.05)
                         border.width: 1
                         border.color: Util.alpha(Commons.Color.menu.text, 0.1)
@@ -826,7 +826,7 @@ Item {
                         Grid {
                           anchors.centerIn: parent
                           columns: 2
-                          spacing: Style.space(10)
+                          spacing: Style.space(14)
 
                           Repeater {
                             model: tile.modelData.entries.slice(0, 4)
@@ -854,7 +854,7 @@ Item {
 
                       Text {
                         anchors.top: tileBox.bottom
-                        anchors.topMargin: Style.spacing.xs
+                        anchors.topMargin: Style.space(10)
                         width: parent.width
                         textFormat: Text.PlainText
                         text: tile.modelData.name + "  ·  " + tile.modelData.entries.length
