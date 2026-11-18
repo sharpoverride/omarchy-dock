@@ -1,9 +1,11 @@
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
+import Quickshell.Io
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "StartMenuModel.js" as Start
 
 // Windows-Start-Menu-style launcher anchored to the dock.
 Item {
@@ -13,7 +15,7 @@ Item {
   property var dock: null
 
   property bool opened: false
-  property bool showAllAppsList: false
+  property string openGroup: ""
   property bool dragging: false
   property var dragEntry: null
   property point dragPoint
@@ -24,6 +26,15 @@ Item {
   property int selectedIndex: 0
   property var apps: []
   property var pinnedApps: []
+  property var recentApps: []
+  property var allApps: []
+  property var groupList: []
+  property var startState: Start.emptyState()
+  property bool keyNav: false
+
+  readonly property string stateFile: Quickshell.env("HOME") + "/.config/omarchy/dock-start.json"
+  readonly property string view: startState.view
+  readonly property int recentColumns: 2
 
   readonly property string dockPosition: root.dock ? root.dock.position : "bottom"
   readonly property int dockReserve: Style.space(76)
@@ -33,7 +44,7 @@ Item {
   readonly property int labelHeight: Math.ceil(labelMetrics.height) * 2
   readonly property int cellWidth: Math.round(iconSize * 2.45)
   readonly property int cellHeight: cellPadding * 2 + iconSize + Style.spacing.xs + labelHeight
-  readonly property int maxColumns: 6
+  readonly property int maxColumns: 8
   readonly property int borderWidth: Math.max(1, Style.space(1))
   readonly property int contentMargin: Style.spacing.lg
   readonly property int inset: contentMargin + borderWidth
@@ -44,14 +55,76 @@ Item {
   readonly property int cardWidth: Math.min(panel.width - screenMargin * 2, maxColumns * cellWidth + inset * 2)
   readonly property int columns: Math.max(1, Math.floor((cardWidth - inset * 2) / cellWidth))
   readonly property int gridWidth: columns * cellWidth
-  readonly property int cardHeight: Math.min(panel.height - dockReserve - screenMargin * 2, Style.space(620))
+  readonly property int cardHeight: Math.min(panel.height - dockReserve - screenMargin * 2, Style.space(820))
 
   readonly property bool searching: filterText.trim().length > 0
-  readonly property var activeList: searching ? apps : (showAllAppsList ? apps : (pinnedApps.length > 0 ? pinnedApps : apps))
+  // Everything the keyboard can reach, in the order it is shown: pinned, then
+  // recommended, then whatever "All" is listing.
+  readonly property var allVisible: view === "category" ? (openGroup ? groupEntries(openGroup) : []) : allApps
+  readonly property var activeList: searching ? apps : pinnedApps.concat(recentApps, allVisible)
+  readonly property int recentOffset: pinnedApps.length
+  readonly property int allOffset: pinnedApps.length + recentApps.length
+
+  function groupEntries(name) {
+    for (var i = 0; i < groupList.length; i++) {
+      if (groupList[i].name === name) return groupList[i].entries
+    }
+    return []
+  }
+
+  function isStartPinned(id) {
+    return Start.pinnedIds(startState, function(other) { return !!DesktopEntries.byId(other) }).indexOf(id) >= 0
+  }
+
+  function saveState(next) {
+    root.startState = next
+    Util.execDetached("printf %s " + Util.shellQuote(Start.serializeState(next)) + " > " + Util.shellQuote(root.stateFile))
+    root.rebuild()
+  }
+
+  function setStartPinned(id, pinned) {
+    var current = Start.pinnedIds(startState, function(other) { return !!DesktopEntries.byId(other) })
+    var next = current.filter(function(other) { return other !== id })
+    if (pinned) next.push(id)
+    root.saveState(Start.withPinned(startState, next))
+  }
+
+  function setView(view) {
+    root.openGroup = ""
+    root.selectedIndex = 0
+    root.saveState(Start.withView(startState, view))
+  }
+
+  function recordLaunch(id) {
+    var next = Start.withRecent(startState, id)
+    root.startState = next
+    Util.execDetached("printf %s " + Util.shellQuote(Start.serializeState(next)) + " > " + Util.shellQuote(root.stateFile))
+  }
+
+  // Scrolls the menu to a keyboard-selected app.
+  function reveal(item) {
+    if (!item || !scroller.visible) return
+    var top = item.mapToItem(scroller.contentItem, 0, 0).y
+    var bottom = top + item.height
+    if (top < scroller.contentY) scroller.contentY = Math.max(0, top - Style.spacing.sm)
+    else if (bottom > scroller.contentY + scroller.height) scroller.contentY = Math.min(scroller.contentHeight - scroller.height, bottom - scroller.height + Style.spacing.sm)
+  }
+
+  FileView {
+    path: root.stateFile
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      root.startState = Start.parseState(text())
+      if (root.opened) root.rebuild()
+    }
+  }
 
   function open() {
     root.selectedIndex = 0
-    root.showAllAppsList = false
+    root.openGroup = ""
+    scroller.contentY = 0
     if (root.appLibrary) root.appLibrary.refreshIcons()
     root.filterText = ""
     searchInput.text = ""
@@ -121,18 +194,25 @@ Item {
     var rows = root.appLibrary ? root.appLibrary.sortedEntries(root.filterText) : []
     root.apps = rows.map(function(row) { return row.entry })
 
-    var pinned = []
-    var keys = root.dock ? root.dock.pinnedKeys : []
-    for (var i = 0; i < keys.length; i++) {
-      var entry = DesktopEntries.byId(keys[i])
-      if (entry && !entry.noDisplay) pinned.push(entry)
+    var all = root.appLibrary ? root.appLibrary.sortedEntries("").map(function(row) { return row.entry }) : []
+    root.allApps = all
+    root.groupList = Start.buildGroups(all, startState.groups)
+    if (root.openGroup && root.groupEntries(root.openGroup).length === 0) root.openGroup = ""
+
+    function resolve(ids, limit) {
+      var out = []
+      for (var i = 0; i < ids.length && out.length < limit; i++) {
+        var entry = DesktopEntries.byId(ids[i])
+        if (entry && !entry.noDisplay && out.indexOf(entry) < 0) out.push(entry)
+      }
+      return out
     }
-    root.pinnedApps = pinned
+    root.pinnedApps = resolve(Start.pinnedIds(startState, function(id) { var e = DesktopEntries.byId(id); return !!e && !e.noDisplay }), 64)
+    root.recentApps = resolve(startState.recent, 6)
 
     var len = root.activeList.length
     root.selectedIndex = len > 0 ? Math.max(0, Math.min(root.selectedIndex, len - 1)) : 0
     if (searchList.contentY > 0) searchList.positionViewAtBeginning()
-    if (allAppsListView.contentY > 0) allAppsListView.positionViewAtBeginning()
   }
 
   function setFilter(text) {
@@ -142,24 +222,33 @@ Item {
     root.rebuild()
   }
 
+  // One row up or down from the selection: a grid row's worth of apps in
+  // Pinned and grid views, a row of Recommended, or a single app in a list.
+  function verticalStep(direction) {
+    if (searching) return direction
+    var i = selectedIndex
+    var step = i < recentOffset ? columns : (i < allOffset ? recentColumns : (view === "list" ? 1 : columns))
+    return direction * step
+  }
+
   function select(delta) {
     var len = root.activeList.length
     if (len === 0) return
+    root.keyNav = true
     root.selectedIndex = Math.max(0, Math.min(len - 1, root.selectedIndex + delta))
+    Qt.callLater(function() { root.keyNav = false })
     if (root.searching) searchList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
-    else if (root.showAllAppsList) allAppsListView.positionViewAtIndex(root.selectedIndex, ListView.Contain)
   }
 
   function launch(index) {
     var entry = root.activeList[index]
     if (!entry || !root.appLibrary) return
-    root.close()
-    if (root.dock) root.dock.launchEntry(entry)
-    else root.appLibrary.launch(entry.id, root.appLibrary.entryName(entry))
+    root.launchEntry(entry)
   }
 
   function launchEntry(entry) {
     if (!entry || !root.appLibrary) return
+    root.recordLaunch(String(entry.id || ""))
     root.close()
     if (root.dock) root.dock.launchEntry(entry)
     else root.appLibrary.launch(entry.id, root.appLibrary.entryName(entry))
@@ -326,22 +415,22 @@ Item {
               } else if (event.key === Qt.Key_Escape) {
                 if (root.menuEntry) root.menuEntry = null
                 else if (root.filterText) root.setFilter("")
-                else if (root.showAllAppsList) { root.showAllAppsList = false; root.selectedIndex = 0 }
+                else if (root.openGroup) { root.openGroup = ""; root.selectedIndex = 0 }
                 else root.close()
                 event.accepted = true
               } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                 root.launch(root.selectedIndex)
                 event.accepted = true
               } else if (event.key === Qt.Key_Up) {
-                root.select((root.searching || root.showAllAppsList) ? -1 : -root.columns)
+                root.select(root.verticalStep(-1))
                 event.accepted = true
               } else if (event.key === Qt.Key_Down) {
-                root.select((root.searching || root.showAllAppsList) ? 1 : root.columns)
+                root.select(root.verticalStep(1))
                 event.accepted = true
-              } else if (!root.searching && !root.showAllAppsList && Util.readingKey(event) === Qt.Key_Left) {
+              } else if (!root.searching && Util.readingKey(event) === Qt.Key_Left) {
                 root.select(-1)
                 event.accepted = true
-              } else if (!root.searching && !root.showAllAppsList && Util.readingKey(event) === Qt.Key_Right) {
+              } else if (!root.searching && Util.readingKey(event) === Qt.Key_Right) {
                 root.select(1)
                 event.accepted = true
               }
@@ -535,252 +624,281 @@ Item {
             }
           }
 
-          // 2) DEFAULT START MENU VIEW (Pinned grid + All apps toggle)
-          Item {
+          // 2) DEFAULT START MENU VIEW: Pinned, Recommended, All
+          Flickable {
+            id: scroller
             anchors.fill: parent
             visible: !root.searching
+            clip: true
+            contentWidth: width
+            contentHeight: sections.implicitHeight + Style.spacing.md
+            boundsBehavior: Flickable.StopAtBounds
 
-            // Section header ("Pinned" + "All apps >" OR "All apps" + "< Back")
-            Item {
-              id: sectionHeader
-              anchors.top: parent.top
-              anchors.left: parent.left
-              anchors.right: parent.right
-              height: Style.space(30)
+            Column {
+              id: sections
+              width: scroller.width
+              spacing: Style.spacing.lg
 
-              Text {
-                anchors.left: parent.left
-                anchors.leftMargin: Style.spacing.xs
-                anchors.verticalCenter: parent.verticalCenter
-                textFormat: Text.PlainText
-                text: (root.showAllAppsList || root.pinnedApps.length === 0) ? "All apps" : "Pinned"
-                color: Commons.Color.menu.text
-                font.family: Style.font.menuFamily
-                font.pixelSize: Style.font.body
-                font.weight: Font.DemiBold
-              }
+              // ---- Pinned ----
+              Column {
+                width: parent.width
+                spacing: Style.spacing.sm
 
-              Rectangle {
-                visible: root.pinnedApps.length > 0
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                height: Style.space(26)
-                width: toggleBtnText.implicitWidth + Style.spacing.md * 2
-                radius: Style.cornerRadius
-                color: toggleBtnMouse.containsMouse ? Style.hoverFill : Util.alpha(Commons.Color.menu.text, 0.06)
-                border.width: 1
-                border.color: Util.alpha(Commons.Color.menu.text, 0.1)
+                SectionTitle { text: "Pinned" }
 
                 Text {
-                  id: toggleBtnText
-                  anchors.centerIn: parent
+                  visible: root.pinnedApps.length === 0
+                  width: parent.width
                   textFormat: Text.PlainText
-                  text: root.showAllAppsList ? "‹  Back" : "All apps  ›"
+                  text: "Right-click an app below and choose Pin to Start."
                   color: Commons.Color.menu.text
+                  opacity: 0.6
                   font.family: Style.font.menuFamily
                   font.pixelSize: Style.font.caption
                 }
 
-                MouseArea {
-                  id: toggleBtnMouse
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: {
-                    root.showAllAppsList = !root.showAllAppsList
-                    root.selectedIndex = 0
-                    searchInput.forceActiveFocus()
+                Flow {
+                  width: parent.width
+                  Repeater {
+                    model: root.pinnedApps
+                    delegate: AppCell {
+                      required property int index
+                      required property var modelData
+                      entry: modelData
+                      globalIndex: index
+                    }
                   }
                 }
               }
-            }
 
-            // Pinned 6-column grid (when not in All apps list)
-            GridView {
-              id: pinnedGrid
-              visible: !root.showAllAppsList && root.pinnedApps.length > 0
-              anchors.top: sectionHeader.bottom
-              anchors.topMargin: Style.spacing.sm
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.bottom: parent.bottom
-              model: visible ? root.pinnedApps : []
-              clip: true
-              cellWidth: root.cellWidth
-              cellHeight: root.cellHeight
-              boundsBehavior: Flickable.StopAtBounds
+              // ---- Recommended ----
+              Column {
+                width: parent.width
+                spacing: Style.spacing.sm
 
-              delegate: Item {
-                id: cell
-
-                required property int index
-                required property var modelData
-                readonly property bool selected: index === root.selectedIndex
-                property point pressPoint
-                property bool moved: false
-
-                width: root.cellWidth
-                height: root.cellHeight
-
-                Rectangle {
-                  anchors.fill: parent
-                  anchors.margins: Style.spacing.xxs
-                  radius: Style.cornerRadius
-                  color: cell.selected ? Commons.Color.menu.selectedBackground : (cellMouse.containsMouse ? Style.hoverFill : "transparent")
-                }
-
-                Image {
-                  id: icon
-                  anchors.horizontalCenter: parent.horizontalCenter
-                  y: root.cellPadding
-                  width: root.iconSize
-                  height: root.iconSize
-                  sourceSize: Qt.size(root.iconSize * 2, root.iconSize * 2)
-                  source: root.appLibrary ? root.appLibrary.iconSource(cell.modelData.icon) : ""
-                  fillMode: Image.PreserveAspectFit
-                  asynchronous: false
-                  smooth: true
-                  mipmap: true
-                }
+                SectionTitle { text: "Recommended" }
 
                 Text {
-                  id: label
-                  anchors.top: icon.bottom
-                  anchors.topMargin: Style.spacing.xs
-                  anchors.horizontalCenter: parent.horizontalCenter
-                  width: parent.width - (root.cellGutter + Style.spacing.xs) * 2
+                  visible: root.recentApps.length === 0
+                  width: parent.width
                   textFormat: Text.PlainText
-                  text: root.appLibrary ? root.appLibrary.entryName(cell.modelData) : ""
-                  color: cell.selected ? Commons.Color.menu.selectedText : Commons.Color.menu.text
+                  text: "Apps you open will show up here."
+                  color: Commons.Color.menu.text
+                  opacity: 0.6
                   font.family: Style.font.menuFamily
                   font.pixelSize: Style.font.caption
-                  horizontalAlignment: Text.AlignHCenter
-                  verticalAlignment: Text.AlignTop
-                  wrapMode: Text.Wrap
-                  maximumLineCount: 2
-                  elide: Text.ElideRight
                 }
 
-                MouseArea {
-                  id: cellMouse
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  acceptedButtons: Qt.LeftButton | Qt.RightButton
-                  preventStealing: true
-                  onContainsMouseChanged: if (containsMouse && !root.dragging) root.selectedIndex = cell.index
-                  onPressed: function(event) {
-                    cell.moved = false
-                    cell.pressPoint = Qt.point(event.x, event.y)
-                  }
-                  onPositionChanged: function(event) {
-                    if (!(pressedButtons & Qt.LeftButton)) return
-                    if (!cell.moved && Math.hypot(event.x - cell.pressPoint.x, event.y - cell.pressPoint.y) > Style.space(4)) cell.moved = true
-                    if (cell.moved) root.dragTo(cell.modelData, cell.mapToItem(panel.contentItem, event.x, event.y))
-                  }
-                  onReleased: function(event) {
-                    if (root.dragging && event.button === Qt.LeftButton) root.dropDrag()
-                  }
-                  onCanceled: if (root.dragging) root.close()
-                  onClicked: function(event) {
-                    if (cell.moved) return
-                    if (event.button === Qt.RightButton) {
-                      root.openMenu(cell.modelData, cell.mapToItem(panel.contentItem, event.x, event.y))
-                      return
+                Flow {
+                  width: parent.width
+                  Repeater {
+                    model: root.recentApps
+                    delegate: AppRow {
+                      required property int index
+                      required property var modelData
+                      width: Math.floor(parent.width / root.recentColumns)
+                      height: Style.space(48)
+                      entry: modelData
+                      globalIndex: root.recentOffset + index
+                      iconPx: Style.space(30)
                     }
-                    root.menuEntry = null
-                    root.launchEntry(cell.modelData)
                   }
                 }
               }
-            }
 
-            // Alphabetical All apps list (Windows 11 style)
-            ListView {
-              id: allAppsListView
-              visible: root.showAllAppsList || root.pinnedApps.length === 0
-              anchors.top: sectionHeader.bottom
-              anchors.topMargin: Style.spacing.sm
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.bottom: parent.bottom
-              model: visible ? root.apps : []
-              clip: true
-              spacing: 2
-              boundsBehavior: Flickable.StopAtBounds
+              // ---- All ----
+              Column {
+                width: parent.width
+                spacing: Style.spacing.sm
 
-              delegate: Rectangle {
-                id: appRow
+                Item {
+                  width: parent.width
+                  height: Style.space(30)
 
-                required property int index
-                required property var modelData
-                readonly property bool selected: index === root.selectedIndex
-                property point pressPoint
-                property bool moved: false
+                  Row {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Style.spacing.xs
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.spacing.sm
 
-                width: allAppsListView.width
-                height: Style.space(40)
-                radius: Style.cornerRadius
-                color: selected ? Commons.Color.menu.selectedBackground : (appRowMouse.containsMouse ? Style.hoverFill : "transparent")
+                    Text {
+                      id: allTitle
+                      textFormat: Text.PlainText
+                      text: "All"
+                      color: Commons.Color.menu.text
+                      opacity: root.openGroup ? 0.65 : 1
+                      font.family: Style.font.menuFamily
+                      font.pixelSize: Style.font.body
+                      font.weight: Font.DemiBold
 
-                Image {
-                  id: appRowIcon
-                  anchors.left: parent.left
-                  anchors.leftMargin: Style.spacing.sm
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: Style.space(24)
-                  height: Style.space(24)
-                  sourceSize: Qt.size(48, 48)
-                  source: root.appLibrary ? root.appLibrary.iconSource(appRow.modelData.icon) : ""
-                  fillMode: Image.PreserveAspectFit
-                  asynchronous: false
-                  smooth: true
-                  mipmap: true
-                }
-
-                Text {
-                  anchors.left: appRowIcon.right
-                  anchors.leftMargin: Style.spacing.md
-                  anchors.right: parent.right
-                  anchors.rightMargin: Style.spacing.sm
-                  anchors.verticalCenter: parent.verticalCenter
-                  textFormat: Text.PlainText
-                  text: root.appLibrary ? root.appLibrary.entryName(appRow.modelData) : ""
-                  color: appRow.selected ? Commons.Color.menu.selectedText : Commons.Color.menu.text
-                  font.family: Style.font.menuFamily
-                  font.pixelSize: Style.font.body
-                  elide: Text.ElideRight
-                }
-
-                MouseArea {
-                  id: appRowMouse
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  acceptedButtons: Qt.LeftButton | Qt.RightButton
-                  preventStealing: true
-                  onContainsMouseChanged: if (containsMouse && !root.dragging) root.selectedIndex = appRow.index
-                  onPressed: function(event) {
-                    appRow.moved = false
-                    appRow.pressPoint = Qt.point(event.x, event.y)
-                  }
-                  onPositionChanged: function(event) {
-                    if (!(pressedButtons & Qt.LeftButton)) return
-                    if (!appRow.moved && Math.hypot(event.x - appRow.pressPoint.x, event.y - appRow.pressPoint.y) > Style.space(4)) appRow.moved = true
-                    if (appRow.moved) root.dragTo(appRow.modelData, appRow.mapToItem(panel.contentItem, event.x, event.y))
-                  }
-                  onReleased: function(event) {
-                    if (root.dragging && event.button === Qt.LeftButton) root.dropDrag()
-                  }
-                  onCanceled: if (root.dragging) root.close()
-                  onClicked: function(event) {
-                    if (appRow.moved) return
-                    if (event.button === Qt.RightButton) {
-                      root.openMenu(appRow.modelData, appRow.mapToItem(panel.contentItem, event.x, event.y))
-                      return
+                      MouseArea {
+                        anchors.fill: parent
+                        enabled: !!root.openGroup
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: { root.openGroup = ""; root.selectedIndex = 0 }
+                      }
                     }
-                    root.menuEntry = null
-                    root.launchEntry(appRow.modelData)
+
+                    Text {
+                      visible: !!root.openGroup
+                      textFormat: Text.PlainText
+                      text: "›  " + root.openGroup
+                      color: Commons.Color.menu.text
+                      font.family: Style.font.menuFamily
+                      font.pixelSize: Style.font.body
+                      font.weight: Font.DemiBold
+                    }
+                  }
+
+                  Row {
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.spacing.xs
+
+                    Text {
+                      anchors.verticalCenter: parent.verticalCenter
+                      textFormat: Text.PlainText
+                      text: "View"
+                      color: Commons.Color.menu.text
+                      opacity: 0.6
+                      font.family: Style.font.menuFamily
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    Repeater {
+                      model: [["category", "Category"], ["list", "List"], ["grid", "Grid"]]
+                      delegate: Rectangle {
+                        required property var modelData
+                        readonly property bool current: root.view === modelData[0]
+                        height: Style.space(24)
+                        width: viewLabel.implicitWidth + Style.spacing.md * 2
+                        radius: Style.cornerRadius
+                        color: current ? Util.alpha(Commons.Color.accent, 0.25) : (viewMouse.containsMouse ? Style.hoverFill : "transparent")
+                        border.width: 1
+                        border.color: current ? Util.alpha(Commons.Color.accent, 0.6) : Util.alpha(Commons.Color.menu.text, 0.1)
+
+                        Text {
+                          id: viewLabel
+                          anchors.centerIn: parent
+                          textFormat: Text.PlainText
+                          text: modelData[1]
+                          color: Commons.Color.menu.text
+                          font.family: Style.font.menuFamily
+                          font.pixelSize: Style.font.caption
+                        }
+
+                        MouseArea {
+                          id: viewMouse
+                          anchors.fill: parent
+                          hoverEnabled: true
+                          cursorShape: Qt.PointingHandCursor
+                          onClicked: root.setView(modelData[0])
+                        }
+                      }
+                    }
+                  }
+                }
+
+                // Category tiles
+                Flow {
+                  visible: root.view === "category" && !root.openGroup
+                  width: parent.width
+                  spacing: Style.spacing.md
+
+                  Repeater {
+                    model: root.groupList
+                    delegate: Item {
+                      id: tile
+                      required property var modelData
+                      readonly property int perRow: 4
+                      width: Math.floor((parent.width - parent.spacing * (perRow - 1)) / perRow)
+                      height: Style.space(150)
+
+                      Rectangle {
+                        id: tileBox
+                        width: parent.width
+                        height: Style.space(112)
+                        radius: Style.cornerRadius * 1.5
+                        color: tileMouse.containsMouse ? Style.hoverFill : Util.alpha(Commons.Color.menu.text, 0.05)
+                        border.width: 1
+                        border.color: Util.alpha(Commons.Color.menu.text, 0.1)
+
+                        Grid {
+                          anchors.centerIn: parent
+                          columns: 2
+                          spacing: Style.space(10)
+
+                          Repeater {
+                            model: tile.modelData.entries.slice(0, 4)
+                            delegate: Image {
+                              required property var modelData
+                              width: Style.space(30)
+                              height: width
+                              sourceSize: Qt.size(60, 60)
+                              source: root.appLibrary ? root.appLibrary.iconSource(modelData.icon) : ""
+                              fillMode: Image.PreserveAspectFit
+                              smooth: true
+                              mipmap: true
+                            }
+                          }
+                        }
+
+                        MouseArea {
+                          id: tileMouse
+                          anchors.fill: parent
+                          hoverEnabled: true
+                          cursorShape: Qt.PointingHandCursor
+                          onClicked: { root.openGroup = tile.modelData.name; root.selectedIndex = root.allOffset }
+                        }
+                      }
+
+                      Text {
+                        anchors.top: tileBox.bottom
+                        anchors.topMargin: Style.spacing.xs
+                        width: parent.width
+                        textFormat: Text.PlainText
+                        text: tile.modelData.name + "  ·  " + tile.modelData.entries.length
+                        color: Commons.Color.menu.text
+                        font.family: Style.font.menuFamily
+                        font.pixelSize: Style.font.caption
+                        horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
+                      }
+                    }
+                  }
+                }
+
+                // Apps of the open category, or every app as a grid
+                Flow {
+                  visible: (root.view === "category" && !!root.openGroup) || root.view === "grid"
+                  width: parent.width
+                  Repeater {
+                    model: (root.view === "category" && !root.openGroup) ? [] : root.allVisible
+                    delegate: AppCell {
+                      required property int index
+                      required property var modelData
+                      entry: modelData
+                      globalIndex: root.allOffset + index
+                    }
+                  }
+                }
+
+                // Every app as an alphabetical list
+                Column {
+                  visible: root.view === "list"
+                  width: parent.width
+                  spacing: 2
+                  Repeater {
+                    model: root.view === "list" ? root.allApps : []
+                    delegate: AppRow {
+                      required property int index
+                      required property var modelData
+                      width: parent.width
+                      height: Style.space(40)
+                      entry: modelData
+                      globalIndex: root.allOffset + index
+                      iconPx: Style.space(24)
+                    }
                   }
                 }
               }
@@ -889,12 +1007,13 @@ Item {
       mipmap: true
     }
 
-    // Right-click on an app: open it, or keep it in the dock or take it out.
+    // Right-click on an app: open it, pin it to Start, keep it in the dock, or uninstall it.
     BorderSurface {
       id: menu
 
       readonly property var entry: root.menuEntry
       readonly property bool pinned: !!entry && !!root.dock && root.dock.isPinned(String(entry.id || ""))
+      readonly property bool startPinned: !!entry && root.isStartPinned(String(entry.id || ""))
 
       visible: !!entry && !root.dragging
       width: Math.max(Style.space(160), menuColumn.implicitWidth) + padding * 2
@@ -925,6 +1044,14 @@ Item {
         }
 
         MenuRow {
+          text: menu.startPinned ? "Unpin from Start" : "Pin to Start"
+          onTriggered: {
+            if (menu.entry) root.setStartPinned(String(menu.entry.id || ""), !menu.startPinned)
+            root.menuEntry = null
+          }
+        }
+
+        MenuRow {
           visible: !!root.dock
           text: menu.pinned ? Commons.I18n.t("dock.removeFromDock") : Commons.I18n.t("dock.keepInDock")
           onTriggered: {
@@ -938,6 +1065,158 @@ Item {
           onTriggered: root.requestUninstall(menu.entry)
         }
       }
+    }
+  }
+
+  component SectionTitle: Text {
+    textFormat: Text.PlainText
+    leftPadding: Style.spacing.xs
+    color: Commons.Color.menu.text
+    font.family: Style.font.menuFamily
+    font.pixelSize: Style.font.body
+    font.weight: Font.DemiBold
+  }
+
+  // Click, right-click and drag-to-dock for an app in any of the lists.
+  component AppMouse: MouseArea {
+    id: appMouse
+
+    required property var entry
+    required property int globalIndex
+    property point pressPoint
+    property bool moved: false
+
+    anchors.fill: parent
+    hoverEnabled: true
+    cursorShape: Qt.PointingHandCursor
+    acceptedButtons: Qt.LeftButton | Qt.RightButton
+    preventStealing: true
+    onContainsMouseChanged: if (containsMouse && !root.dragging) root.selectedIndex = globalIndex
+    onPressed: function(event) {
+      moved = false
+      pressPoint = Qt.point(event.x, event.y)
+    }
+    onPositionChanged: function(event) {
+      if (!(pressedButtons & Qt.LeftButton)) return
+      if (!moved && Math.hypot(event.x - pressPoint.x, event.y - pressPoint.y) > Style.space(4)) moved = true
+      if (moved) root.dragTo(entry, appMouse.mapToItem(panel.contentItem, event.x, event.y))
+    }
+    onReleased: function(event) {
+      if (root.dragging && event.button === Qt.LeftButton) root.dropDrag()
+    }
+    onCanceled: if (root.dragging) root.close()
+    onClicked: function(event) {
+      if (moved) return
+      if (event.button === Qt.RightButton) {
+        root.openMenu(entry, appMouse.mapToItem(panel.contentItem, event.x, event.y))
+        return
+      }
+      root.menuEntry = null
+      root.launchEntry(entry)
+    }
+  }
+
+  // Icon over a label.
+  component AppCell: Item {
+    id: cell
+
+    property var entry: null
+    property int globalIndex: -1
+    readonly property bool selected: globalIndex === root.selectedIndex
+
+    width: root.cellWidth
+    height: root.cellHeight
+    onSelectedChanged: if (selected && root.keyNav) root.reveal(cell)
+
+    Rectangle {
+      anchors.fill: parent
+      anchors.margins: Style.spacing.xxs
+      radius: Style.cornerRadius
+      color: cell.selected ? Commons.Color.menu.selectedBackground : (cellMouse.containsMouse ? Style.hoverFill : "transparent")
+    }
+
+    Image {
+      id: cellIcon
+      anchors.horizontalCenter: parent.horizontalCenter
+      y: root.cellPadding
+      width: root.iconSize
+      height: root.iconSize
+      sourceSize: Qt.size(root.iconSize * 2, root.iconSize * 2)
+      source: root.appLibrary && cell.entry ? root.appLibrary.iconSource(cell.entry.icon) : ""
+      fillMode: Image.PreserveAspectFit
+      smooth: true
+      mipmap: true
+    }
+
+    Text {
+      anchors.top: cellIcon.bottom
+      anchors.topMargin: Style.spacing.xs
+      anchors.horizontalCenter: parent.horizontalCenter
+      width: parent.width - (root.cellGutter + Style.spacing.xs) * 2
+      textFormat: Text.PlainText
+      text: root.appLibrary && cell.entry ? root.appLibrary.entryName(cell.entry) : ""
+      color: cell.selected ? Commons.Color.menu.selectedText : Commons.Color.menu.text
+      font.family: Style.font.menuFamily
+      font.pixelSize: Style.font.caption
+      horizontalAlignment: Text.AlignHCenter
+      verticalAlignment: Text.AlignTop
+      wrapMode: Text.Wrap
+      maximumLineCount: 2
+      elide: Text.ElideRight
+    }
+
+    AppMouse {
+      id: cellMouse
+      entry: cell.entry
+      globalIndex: cell.globalIndex
+    }
+  }
+
+  // Icon beside a name.
+  component AppRow: Rectangle {
+    id: row
+
+    property var entry: null
+    property int globalIndex: -1
+    property int iconPx: Style.space(24)
+    readonly property bool selected: globalIndex === root.selectedIndex
+
+    radius: Style.cornerRadius
+    color: selected ? Commons.Color.menu.selectedBackground : (rowMouse.containsMouse ? Style.hoverFill : "transparent")
+    onSelectedChanged: if (selected && root.keyNav) root.reveal(row)
+
+    Image {
+      id: rowIcon
+      anchors.left: parent.left
+      anchors.leftMargin: Style.spacing.sm
+      anchors.verticalCenter: parent.verticalCenter
+      width: row.iconPx
+      height: row.iconPx
+      sourceSize: Qt.size(row.iconPx * 2, row.iconPx * 2)
+      source: root.appLibrary && row.entry ? root.appLibrary.iconSource(row.entry.icon) : ""
+      fillMode: Image.PreserveAspectFit
+      smooth: true
+      mipmap: true
+    }
+
+    Text {
+      anchors.left: rowIcon.right
+      anchors.leftMargin: Style.spacing.md
+      anchors.right: parent.right
+      anchors.rightMargin: Style.spacing.sm
+      anchors.verticalCenter: parent.verticalCenter
+      textFormat: Text.PlainText
+      text: root.appLibrary && row.entry ? root.appLibrary.entryName(row.entry) : ""
+      color: row.selected ? Commons.Color.menu.selectedText : Commons.Color.menu.text
+      font.family: Style.font.menuFamily
+      font.pixelSize: Style.font.body
+      elide: Text.ElideRight
+    }
+
+    AppMouse {
+      id: rowMouse
+      entry: row.entry
+      globalIndex: row.globalIndex
     }
   }
 
