@@ -345,7 +345,7 @@ Item {
           anchors.top: parent.top
           anchors.left: parent.left
           anchors.right: parent.right
-          anchors.topMargin: root.contentMargin
+          anchors.topMargin: root.contentMargin + root.sectionPad
           anchors.leftMargin: root.contentMargin + root.sectionPad
           anchors.rightMargin: root.contentMargin + root.sectionPad
           height: root.searchHeight
@@ -485,11 +485,22 @@ Item {
           }
         }
 
+        // Marks where the search area ends and the scrolling area begins
+        Rectangle {
+          id: searchDivider
+          anchors.top: searchBox.bottom
+          anchors.topMargin: root.sectionPad
+          anchors.left: parent.left
+          anchors.right: parent.right
+          height: 1
+          color: Util.alpha(Commons.Color.menu.text, 0.1)
+        }
+
         // Body area between search bar and footer
         Item {
           id: bodyArea
-          anchors.top: searchBox.bottom
-          anchors.topMargin: Style.spacing.md
+          anchors.top: searchDivider.bottom
+          anchors.topMargin: root.sectionPad
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.leftMargin: root.contentMargin + root.sectionPad
@@ -829,7 +840,10 @@ Item {
 
                         Grid {
                           z: 1
-                          anchors.centerIn: parent
+                          anchors.horizontalCenter: parent.horizontalCenter
+                          anchors.top: parent.top
+                          anchors.topMargin: Math.round(tileBox.width * 0.06)
+                          width: Math.round(tileBox.width * 0.44) * 2
                           columns: 2
                           spacing: 0
 
