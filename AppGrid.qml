@@ -42,18 +42,20 @@ Item {
   readonly property int cellGutter: Style.spacing.xs
   readonly property int cellPadding: Style.spacing.md
   readonly property int labelHeight: Math.ceil(labelMetrics.height) * 2
-  readonly property int cellWidth: Math.round(iconSize * 2.45)
+  readonly property int cellWidth: Math.round(iconSize * 2.75)
   readonly property int cellHeight: cellPadding * 2 + iconSize + Style.spacing.xs + labelHeight
   readonly property int maxColumns: 8
   readonly property int borderWidth: Math.max(1, Style.space(1))
   readonly property int contentMargin: Style.spacing.lg
   readonly property int inset: contentMargin + borderWidth
+  readonly property int sectionPad: Math.round(iconSize * 0.9)
+  readonly property int sectionGap: Math.round(iconSize * 0.875)
   readonly property int searchHeight: Math.max(Style.space(38), Style.font.body + Style.spacing.controlPaddingY * 2)
   readonly property int footerHeight: Style.space(44)
   readonly property int screenMargin: Style.space(16)
 
-  readonly property int cardWidth: Math.min(panel.width - screenMargin * 2, maxColumns * cellWidth + inset * 2)
-  readonly property int columns: Math.max(1, Math.floor((cardWidth - inset * 2) / cellWidth))
+  readonly property int cardWidth: Math.min(panel.width - screenMargin * 2, maxColumns * cellWidth + (inset + sectionPad) * 2)
+  readonly property int columns: Math.max(1, Math.floor((cardWidth - (inset + sectionPad) * 2) / cellWidth))
   readonly property int gridWidth: columns * cellWidth
   readonly property int cardHeight: Math.min(panel.height - dockReserve - screenMargin * 2, Style.space(820))
 
@@ -490,8 +492,8 @@ Item {
           anchors.topMargin: Style.spacing.md
           anchors.left: parent.left
           anchors.right: parent.right
-          anchors.leftMargin: root.contentMargin
-          anchors.rightMargin: root.contentMargin
+          anchors.leftMargin: root.contentMargin + root.sectionPad
+          anchors.rightMargin: root.contentMargin + root.sectionPad
           anchors.bottom: footerDivider.top
           anchors.bottomMargin: Style.spacing.sm
 
@@ -637,7 +639,7 @@ Item {
             Column {
               id: sections
               width: scroller.width
-              spacing: Style.spacing.lg
+              spacing: Math.round(root.iconSize * 1.2)
 
               // ---- Pinned ----
               Column {
@@ -803,7 +805,7 @@ Item {
                 Flow {
                   visible: root.view === "category" && !root.openGroup
                   width: parent.width
-                  spacing: Style.space(16)
+                  spacing: root.sectionGap
 
                   Repeater {
                     model: root.groupList
@@ -814,13 +816,13 @@ Item {
                       property bool raised: false
                       z: raised ? 10 : 0
                       width: Math.floor((parent.width - parent.spacing * (perRow - 1)) / perRow)
-                      height: Style.space(164)
+                      height: width + root.iconSize * 0.9
 
                       Rectangle {
                         id: tileBox
                         width: parent.width
-                        height: Style.space(112)
-                        radius: 20
+                        height: parent.width
+                        radius: Style.space(20)
                         color: tileMouse.containsMouse ? Style.hoverFill : Util.alpha(Commons.Color.menu.text, 0.05)
                         border.width: 1
                         border.color: Util.alpha(Commons.Color.menu.text, 0.1)
@@ -829,7 +831,7 @@ Item {
                           z: 1
                           anchors.centerIn: parent
                           columns: 2
-                          spacing: Style.space(4)
+                          spacing: 0
 
                           Repeater {
                             model: tile.modelData.entries.slice(0, 4)
@@ -837,20 +839,20 @@ Item {
                               id: mini
                               required property var modelData
                               readonly property string appName: root.appLibrary ? root.appLibrary.entryName(modelData) : String(modelData.name || "")
-                              width: Style.space(44)
+                              width: Math.round(tileBox.width * 0.44)
                               height: width
 
                               Rectangle {
                                 anchors.fill: parent
-                                radius: Style.space(10)
+                                radius: Style.space(12)
                                 color: miniMouse.containsMouse ? Style.hoverFill : "transparent"
                               }
 
                               Image {
                                 anchors.centerIn: parent
-                                width: Style.space(30)
+                                width: root.iconSize
                                 height: width
-                                sourceSize: Qt.size(60, 60)
+                                sourceSize: Qt.size(root.iconSize * 2, root.iconSize * 2)
                                 source: root.appLibrary ? root.appLibrary.iconSource(mini.modelData.icon) : ""
                                 fillMode: Image.PreserveAspectFit
                                 smooth: true
@@ -904,7 +906,7 @@ Item {
 
                       Text {
                         anchors.top: tileBox.bottom
-                        anchors.topMargin: Style.space(10)
+                        anchors.topMargin: Math.round(root.iconSize * 0.35)
                         width: parent.width
                         textFormat: Text.PlainText
                         text: tile.modelData.name + "  ·  " + tile.modelData.entries.length
