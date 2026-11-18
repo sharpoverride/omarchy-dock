@@ -826,6 +826,7 @@ Item {
                         border.color: Util.alpha(Commons.Color.menu.text, 0.1)
 
                         Grid {
+                          z: 1
                           anchors.centerIn: parent
                           columns: 2
                           spacing: Style.space(4)
