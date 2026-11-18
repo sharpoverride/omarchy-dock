@@ -346,8 +346,8 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.topMargin: root.contentMargin
-          anchors.leftMargin: root.contentMargin
-          anchors.rightMargin: root.contentMargin
+          anchors.leftMargin: root.contentMargin + root.sectionPad
+          anchors.rightMargin: root.contentMargin + root.sectionPad
           height: root.searchHeight
           radius: height / 2
           color: Util.alpha(Commons.Color.menu.text, 0.07)
@@ -978,7 +978,7 @@ Item {
 
           Row {
             anchors.left: parent.left
-            anchors.leftMargin: root.contentMargin
+            anchors.leftMargin: root.contentMargin + root.sectionPad
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.spacing.sm
 
@@ -1013,7 +1013,7 @@ Item {
 
           Row {
             anchors.right: parent.right
-            anchors.rightMargin: root.contentMargin
+            anchors.rightMargin: root.contentMargin + root.sectionPad
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.spacing.xs
 
