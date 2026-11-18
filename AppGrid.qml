@@ -811,6 +811,8 @@ Item {
                       id: tile
                       required property var modelData
                       readonly property int perRow: 4
+                      property bool raised: false
+                      z: raised ? 10 : 0
                       width: Math.floor((parent.width - parent.spacing * (perRow - 1)) / perRow)
                       height: Style.space(164)
 
@@ -826,19 +828,66 @@ Item {
                         Grid {
                           anchors.centerIn: parent
                           columns: 2
-                          spacing: Style.space(14)
+                          spacing: Style.space(4)
 
                           Repeater {
                             model: tile.modelData.entries.slice(0, 4)
-                            delegate: Image {
+                            delegate: Item {
+                              id: mini
                               required property var modelData
-                              width: Style.space(30)
+                              readonly property string appName: root.appLibrary ? root.appLibrary.entryName(modelData) : String(modelData.name || "")
+                              width: Style.space(44)
                               height: width
-                              sourceSize: Qt.size(60, 60)
-                              source: root.appLibrary ? root.appLibrary.iconSource(modelData.icon) : ""
-                              fillMode: Image.PreserveAspectFit
-                              smooth: true
-                              mipmap: true
+
+                              Rectangle {
+                                anchors.fill: parent
+                                radius: Style.space(10)
+                                color: miniMouse.containsMouse ? Style.hoverFill : "transparent"
+                              }
+
+                              Image {
+                                anchors.centerIn: parent
+                                width: Style.space(30)
+                                height: width
+                                sourceSize: Qt.size(60, 60)
+                                source: root.appLibrary ? root.appLibrary.iconSource(mini.modelData.icon) : ""
+                                fillMode: Image.PreserveAspectFit
+                                smooth: true
+                                mipmap: true
+                              }
+
+                              MouseArea {
+                                id: miniMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onContainsMouseChanged: tile.raised = containsMouse
+                                onClicked: { root.menuEntry = null; root.launchEntry(mini.modelData) }
+                              }
+
+                              Rectangle {
+                                visible: miniMouse.containsMouse
+                                z: 100
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.bottom: parent.top
+                                anchors.bottomMargin: Style.space(4)
+                                width: tipText.implicitWidth + Style.space(20)
+                                height: tipText.implicitHeight + Style.space(12)
+                                radius: Style.space(8)
+                                color: Commons.Color.menu.background
+                                border.width: 1
+                                border.color: Util.alpha(Commons.Color.menu.text, 0.2)
+
+                                Text {
+                                  id: tipText
+                                  anchors.centerIn: parent
+                                  textFormat: Text.PlainText
+                                  text: mini.appName
+                                  color: Commons.Color.menu.text
+                                  font.family: Style.font.menuFamily
+                                  font.pixelSize: Style.font.caption
+                                }
+                              }
                             }
                           }
                         }
